@@ -59,3 +59,36 @@ class MultimodalDataset(Dataset):
         text_feat = torch.tensor(self.text_features[idx], dtype=torch.float32)
         label = sample.label if sample.label is not None else -1
         return img, text_feat, label
+
+
+class TextOnlyDataset(Dataset):
+    def __init__(self, samples: List[Sample], text_features):
+        self.samples = samples
+        self.text_features = text_features
+
+    def __len__(self) -> int:
+        return len(self.samples)
+
+    def __getitem__(self, idx: int):
+        sample = self.samples[idx]
+        text_feat = torch.tensor(self.text_features[idx], dtype=torch.float32)
+        label = sample.label if sample.label is not None else -1
+        return text_feat, label
+
+
+class ImageOnlyDataset(Dataset):
+    def __init__(self, samples: List[Sample], image_transform=None):
+        self.samples = samples
+        self.image_transform = image_transform
+
+    def __len__(self) -> int:
+        return len(self.samples)
+
+    def __getitem__(self, idx: int):
+        sample = self.samples[idx]
+        with Image.open(sample.image_path) as img:
+            img = img.convert("RGB")
+            if self.image_transform:
+                img = self.image_transform(img)
+        label = sample.label if sample.label is not None else -1
+        return img, label
