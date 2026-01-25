@@ -21,6 +21,7 @@ from sklearn.metrics import (
 import torch
 from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
+from PIL import Image
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -197,24 +198,34 @@ def _plot_roc(labels: list[int], probs: list[list[float]], out_path: Path) -> No
     plt.close(fig)
 
 
-def _plot_correlation(stats_csv: Path, preds: list[int], labels: list[int], out_path: Path) -> None:
-    if not stats_csv.exists():
+def _plot_correlation(samples, preds: list[int], labels: list[int], out_path: Path) -> None:
+    if len(samples) != len(preds):
         return
-    df = pd.read_csv(stats_csv)
-    df = df[df["split"] == "train"].copy()
-    df = df[["guid", "text_len", "image_width", "image_height"]]
-    df["image_area"] = df["image_width"] * df["image_height"]
-    pred_df = pd.DataFrame({"guid": df["guid"], "pred": preds, "label": labels})
-    merged = pd.merge(df, pred_df, on="guid", how="inner")
-    merged["correct"] = (merged["pred"] == merged["label"]).astype(int)
+    rows = []
+    for sample, pred, label in zip(samples, preds, labels):
+        if not sample.text_path.exists() or not sample.image_path.exists():
+            continue
+        text_len = len(read_text(sample.text_path))
+        with Image.open(sample.image_path) as img:
+            width, height = img.size
+        rows.append(
+            {
+                "text_len": text_len,
+                "image_area": width * height,
+                "correct": int(pred == label),
+            }
+        )
+    if not rows:
+        return
+    df = pd.DataFrame(rows)
 
     fig, axes = plt.subplots(1, 2, figsize=(8, 3.5))
-    axes[0].scatter(merged["text_len"], merged["correct"], s=6, alpha=0.5)
+    axes[0].scatter(df["text_len"], df["correct"], s=6, alpha=0.5)
     axes[0].set_xlabel("text_len")
     axes[0].set_ylabel("correct")
     axes[0].set_title("Text Length vs Correct")
 
-    axes[1].scatter(merged["image_area"], merged["correct"], s=6, alpha=0.5)
+    axes[1].scatter(df["image_area"], df["correct"], s=6, alpha=0.5)
     axes[1].set_xlabel("image_area")
     axes[1].set_ylabel("correct")
     axes[1].set_title("Image Area vs Correct")
@@ -352,12 +363,7 @@ def main() -> None:
     _plot_curves(history, plot_path)
     _plot_confusion(metrics["labels"], metrics["preds"], visuals_dir / "confusion.png")
     _plot_roc(metrics["labels"], metrics["probs"], visuals_dir / "roc.png")
-    _plot_correlation(
-        root / "outputs" / "processed" / "data_stats.csv",
-        metrics["preds"],
-        metrics["labels"],
-        visuals_dir / "correlation.png",
-    )
+    _plot_correlation(val_samples, metrics["preds"], metrics["labels"], visuals_dir / "correlation.png")
     print(f"Saved best model to: {best_path}")
     print(f"Saved metrics to: {metrics_path}")
     print(f"Saved history to: {history_path}")
