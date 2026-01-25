@@ -9,9 +9,18 @@ import sys
 import numpy as np
 import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics import accuracy_score, f1_score
+from sklearn.metrics import (
+    accuracy_score,
+    f1_score,
+    precision_score,
+    recall_score,
+    confusion_matrix,
+    roc_curve,
+    auc,
+)
 import torch
 from torch.utils.data import DataLoader
+import matplotlib.pyplot as plt
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -31,6 +40,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--test-csv", type=Path, default=None)
     parser.add_argument("--epochs", type=int, default=5)
     parser.add_argument("--batch-size", type=int, default=32)
+    parser.add_argument("--num-workers", type=int, default=4)
+    parser.add_argument("--pin-memory", action="store_true")
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--weight-decay", type=float, default=1e-4)
     parser.add_argument("--image-size", type=int, default=224)
@@ -39,6 +50,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--tfidf-max-df", type=float, default=0.95)
     parser.add_argument("--remove-stopwords", action="store_true")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--no-train-aug", action="store_true")
     parser.add_argument("--no-pretrained", action="store_true")
     return parser.parse_args()
 
@@ -47,6 +59,8 @@ def set_seed(seed: int) -> None:
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
 
 
 def _default_splits(root: Path) -> tuple[Path, Path, Path]:
@@ -96,17 +110,118 @@ def evaluate(model, loader, device) -> dict:
     model.eval()
     preds = []
     labels = []
+    probs = []
     with torch.no_grad():
         for images, text_features, y in loader:
             images = images.to(device)
             text_features = text_features.to(device)
             logits = model(images, text_features)
+            prob = torch.softmax(logits, dim=1).cpu().numpy()
+            probs.extend(prob.tolist())
             pred = torch.argmax(logits, dim=1).cpu().numpy().tolist()
             preds.extend(pred)
             labels.extend(y.numpy().tolist())
     acc = accuracy_score(labels, preds)
-    f1 = f1_score(labels, preds, average="macro")
-    return {"acc": acc, "f1_macro": f1}
+    f1 = f1_score(labels, preds, average="macro", zero_division=0)
+    precision = precision_score(labels, preds, average="macro", zero_division=0)
+    recall = recall_score(labels, preds, average="macro", zero_division=0)
+    return {
+        "acc": acc,
+        "f1_macro": f1,
+        "precision_macro": precision,
+        "recall_macro": recall,
+        "labels": labels,
+        "preds": preds,
+        "probs": probs,
+    }
+
+
+def _plot_curves(history: list[dict], out_path: Path) -> None:
+    if not history:
+        return
+    epochs = [h["epoch"] for h in history]
+    train_loss = [h["train_loss"] for h in history]
+    val_acc = [h["val_acc"] for h in history]
+
+    fig, ax1 = plt.subplots(figsize=(8, 4))
+    ax1.plot(epochs, train_loss, color="tab:red", label="train_loss")
+    ax1.set_xlabel("epoch")
+    ax1.set_ylabel("loss", color="tab:red")
+    ax1.tick_params(axis="y", labelcolor="tab:red")
+
+    ax2 = ax1.twinx()
+    ax2.plot(epochs, val_acc, color="tab:blue", label="val_acc")
+    ax2.set_ylabel("accuracy", color="tab:blue")
+    ax2.tick_params(axis="y", labelcolor="tab:blue")
+
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=150)
+    plt.close(fig)
+
+
+def _plot_confusion(labels: list[int], preds: list[int], out_path: Path) -> None:
+    cm = confusion_matrix(labels, preds, labels=list(range(len(LABELS))))
+    fig, ax = plt.subplots(figsize=(4.5, 4))
+    im = ax.imshow(cm, cmap="Blues")
+    ax.set_xticks(range(len(LABELS)))
+    ax.set_yticks(range(len(LABELS)))
+    ax.set_xticklabels(LABELS, rotation=45, ha="right")
+    ax.set_yticklabels(LABELS)
+    ax.set_xlabel("pred")
+    ax.set_ylabel("true")
+    for i in range(cm.shape[0]):
+        for j in range(cm.shape[1]):
+            ax.text(j, i, str(cm[i, j]), ha="center", va="center", fontsize=8)
+    fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=150)
+    plt.close(fig)
+
+
+def _plot_roc(labels: list[int], probs: list[list[float]], out_path: Path) -> None:
+    y_true = np.array(labels)
+    y_score = np.array(probs)
+    fig, ax = plt.subplots(figsize=(5, 4))
+    for class_id, class_name in enumerate(LABELS):
+        y_bin = (y_true == class_id).astype(int)
+        fpr, tpr, _ = roc_curve(y_bin, y_score[:, class_id])
+        roc_auc = auc(fpr, tpr)
+        ax.plot(fpr, tpr, label=f"{class_name} (AUC={roc_auc:.3f})")
+    ax.plot([0, 1], [0, 1], "k--", linewidth=1)
+    ax.set_xlabel("FPR")
+    ax.set_ylabel("TPR")
+    ax.set_title("ROC (OvR)")
+    ax.legend(fontsize=8)
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=150)
+    plt.close(fig)
+
+
+def _plot_correlation(stats_csv: Path, preds: list[int], labels: list[int], out_path: Path) -> None:
+    if not stats_csv.exists():
+        return
+    df = pd.read_csv(stats_csv)
+    df = df[df["split"] == "train"].copy()
+    df = df[["guid", "text_len", "image_width", "image_height"]]
+    df["image_area"] = df["image_width"] * df["image_height"]
+    pred_df = pd.DataFrame({"guid": df["guid"], "pred": preds, "label": labels})
+    merged = pd.merge(df, pred_df, on="guid", how="inner")
+    merged["correct"] = (merged["pred"] == merged["label"]).astype(int)
+
+    fig, axes = plt.subplots(1, 2, figsize=(8, 3.5))
+    axes[0].scatter(merged["text_len"], merged["correct"], s=6, alpha=0.5)
+    axes[0].set_xlabel("text_len")
+    axes[0].set_ylabel("correct")
+    axes[0].set_title("Text Length vs Correct")
+
+    axes[1].scatter(merged["image_area"], merged["correct"], s=6, alpha=0.5)
+    axes[1].set_xlabel("image_area")
+    axes[1].set_ylabel("correct")
+    axes[1].set_title("Image Area vs Correct")
+
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=150)
+    plt.close(fig)
 
 
 def main() -> None:
@@ -133,17 +248,29 @@ def main() -> None:
         args.remove_stopwords,
     )
 
-    train_ds = MultimodalDataset(
-        train_samples, train_feats, get_train_transforms(args.image_size)
+    train_transform = (
+        get_eval_transforms(args.image_size)
+        if args.no_train_aug
+        else get_train_transforms(args.image_size)
     )
+    train_ds = MultimodalDataset(train_samples, train_feats, train_transform)
     val_ds = MultimodalDataset(
         val_samples, val_feats, get_eval_transforms(args.image_size)
     )
 
-    train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True)
-    val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False)
-
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if device.type == "cuda":
+        torch.backends.cudnn.benchmark = True
+    print(f"Device: {device}")
+
+    loader_kwargs = dict(
+        batch_size=args.batch_size,
+        num_workers=args.num_workers,
+        pin_memory=args.pin_memory and device.type == "cuda",
+        persistent_workers=args.num_workers > 0,
+    )
+    train_loader = DataLoader(train_ds, shuffle=True, **loader_kwargs)
+    val_loader = DataLoader(val_ds, shuffle=False, **loader_kwargs)
     model = MultimodalClassifier(
         text_dim=train_feats.shape[1],
         num_classes=len(LABELS),
@@ -158,6 +285,7 @@ def main() -> None:
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
     best_f1 = -1.0
+    history = []
     outputs_dir = root / "outputs" / "models"
     outputs_dir.mkdir(parents=True, exist_ok=True)
     best_path = outputs_dir / "best_tfidf_resnet.pt"
@@ -181,7 +309,18 @@ def main() -> None:
         avg_loss = running_loss / max(len(train_loader), 1)
         print(
             f"Epoch {epoch}/{args.epochs} - loss {avg_loss:.4f} "
-            f"val_acc {metrics['acc']:.4f} val_f1 {metrics['f1_macro']:.4f}"
+            f"val_acc {metrics['acc']:.4f} val_f1 {metrics['f1_macro']:.4f} "
+            f"val_prec {metrics['precision_macro']:.4f} val_rec {metrics['recall_macro']:.4f}"
+        )
+        history.append(
+            {
+                "epoch": epoch,
+                "train_loss": avg_loss,
+                "val_acc": metrics["acc"],
+                "val_f1_macro": metrics["f1_macro"],
+                "val_precision_macro": metrics["precision_macro"],
+                "val_recall_macro": metrics["recall_macro"],
+            }
         )
         if metrics["f1_macro"] > best_f1:
             best_f1 = metrics["f1_macro"]
@@ -196,10 +335,34 @@ def main() -> None:
             )
 
     metrics_path = root / "outputs" / "metrics_tfidf_resnet.json"
+    history_path = root / "outputs" / "metrics_tfidf_resnet.csv"
+    visuals_dir = root / "outputs" / "visuals"
+    visuals_dir.mkdir(parents=True, exist_ok=True)
     with metrics_path.open("w", encoding="utf-8") as f:
-        json.dump({"best_val_f1_macro": best_f1}, f, ensure_ascii=False, indent=2)
+        json.dump(
+            {
+                "best_val_f1_macro": best_f1,
+            },
+            f,
+            ensure_ascii=False,
+            indent=2,
+        )
+    pd.DataFrame(history).to_csv(history_path, index=False)
+    plot_path = root / "outputs" / "metrics_tfidf_resnet.png"
+    _plot_curves(history, plot_path)
+    _plot_confusion(metrics["labels"], metrics["preds"], visuals_dir / "confusion.png")
+    _plot_roc(metrics["labels"], metrics["probs"], visuals_dir / "roc.png")
+    _plot_correlation(
+        root / "outputs" / "processed" / "data_stats.csv",
+        metrics["preds"],
+        metrics["labels"],
+        visuals_dir / "correlation.png",
+    )
     print(f"Saved best model to: {best_path}")
     print(f"Saved metrics to: {metrics_path}")
+    print(f"Saved history to: {history_path}")
+    print(f"Saved curves to: {plot_path}")
+    print(f"Saved visuals to: {visuals_dir}")
 
 
 if __name__ == "__main__":
