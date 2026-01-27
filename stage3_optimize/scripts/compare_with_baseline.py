@@ -1,4 +1,8 @@
+﻿# -*- coding: utf-8 -*-
 from __future__ import annotations
+# 作用: 对比优化前后 CLIP 指标。
+# 流程: 读取 baseline 与优化 history.csv，取最佳 F1。
+# 输出: outputs/optimize/compare_opt_vs_base.csv。
 
 import argparse
 import json
@@ -8,6 +12,7 @@ import pandas as pd
 
 
 def parse_args() -> argparse.Namespace:
+    # 解析命令行参数
     parser = argparse.ArgumentParser(description="Compare optimized CLIP with stage2 baseline CLIP.")
     parser.add_argument("--project-root", type=Path, default=Path("."))
     parser.add_argument("--baseline-run", type=str, default="clip_openai_clip-vit-base-patch32")
@@ -17,6 +22,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def _best_from_history(path: Path) -> dict | None:
+    # 从历史 CSV 中找到最优 epoch
     if not path.exists():
         return None
     df = pd.read_csv(path)
@@ -32,6 +38,7 @@ def _best_from_history(path: Path) -> dict | None:
 
 
 def main() -> None:
+    # 主流程：对比并保存
     args = parse_args()
     root = args.project_root.resolve()
     out = args.output or (root / "outputs" / "optimize" / "compare_opt_vs_base.csv")

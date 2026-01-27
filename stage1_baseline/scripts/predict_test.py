@@ -1,4 +1,8 @@
+﻿# -*- coding: utf-8 -*-
 from __future__ import annotations
+# 作用: 使用基线模型预测测试集标签。
+# 流程: 读取最优权重 -> 推理 -> 生成提交文件。
+# 输出: outputs/test_with_label.txt。
 
 import argparse
 from pathlib import Path
@@ -9,6 +13,7 @@ import torch
 from torch.utils.data import DataLoader
 
 def _find_project_root(start: Path) -> Path:
+    # 向上查找项目根目录
     cur = start
     while True:
         if (cur / 'requirements.txt').exists() or (cur / '.git').exists():
@@ -28,6 +33,7 @@ from src.text_utils import clean_text_advanced, read_text
 
 
 def parse_args() -> argparse.Namespace:
+    # 解析命令行参数
     parser = argparse.ArgumentParser(description="Predict test labels with best multimodal model.")
     parser.add_argument("--project-root", type=Path, default=Path("."))
     parser.add_argument("--test-csv", type=Path, default=None)
@@ -57,6 +63,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def _default_paths(root: Path) -> tuple[Path, Path, Path]:
+    # 默认测试集/权重/原始文件路径
     return (
         root / "outputs" / "splits" / "test.csv",
         root / "outputs" / "models" / "best_tfidf_resnet.pt",
@@ -65,6 +72,7 @@ def _default_paths(root: Path) -> tuple[Path, Path, Path]:
 
 
 def load_texts(samples) -> list[str]:
+    # 读取并清洗文本
     texts = []
     for s in samples:
         raw = read_text(s.text_path)
@@ -73,6 +81,7 @@ def load_texts(samples) -> list[str]:
 
 
 def main() -> None:
+    # 主流程：加载权重并生成提交文件
     args = parse_args()
     root = args.project_root.resolve()
     default_test_csv, default_ckpt, default_test_file = _default_paths(root)

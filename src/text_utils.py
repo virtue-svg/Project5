@@ -1,4 +1,8 @@
+﻿# -*- coding: utf-8 -*-
 from __future__ import annotations
+# 作用: 文本读取与清洗工具。
+# 流程: 去除 URL/@/重复字符/emoji 等噪声。
+# 输出: 清洗后的文本字符串。
 
 import re
 from pathlib import Path
@@ -52,6 +56,7 @@ _STOPWORDS = {
 
 
 def read_text(path: Path) -> str:
+    # 读取文本文件，兼容编码异常
     try:
         return path.read_text(encoding="utf-8")
     except UnicodeDecodeError:
@@ -59,6 +64,7 @@ def read_text(path: Path) -> str:
 
 
 def clean_text(text: str) -> str:
+    # 基础清洗：URL/@/空白/小写
     text = _URL_RE.sub(" ", text)
     text = _MENTION_RE.sub(" ", text)
     text = text.replace("#", " ")
@@ -72,6 +78,7 @@ def clean_text_advanced(
     collapse_repeats: bool = True,
     remove_stopwords: bool = False,
 ) -> str:
+    # 进阶清洗：emoji 替换、重复字符折叠、可选停用词
     text = clean_text(text)
     if replace_emoji:
         text = _EMOJI_RE.sub(" <emoji> ", text)

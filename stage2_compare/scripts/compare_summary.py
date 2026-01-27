@@ -1,4 +1,8 @@
+﻿# -*- coding: utf-8 -*-
 from __future__ import annotations
+# 作用: 汇总对比实验结果。
+# 流程: 读取各 run 的 history.csv，取最佳 F1。
+# 输出: outputs/compare/compare_summary.csv。
 
 import argparse
 from pathlib import Path
@@ -7,6 +11,7 @@ import pandas as pd
 
 
 def parse_args() -> argparse.Namespace:
+    # 解析命令行参数
     parser = argparse.ArgumentParser(description="Summarize comparison runs.")
     parser.add_argument("--project-root", type=Path, default=Path("."))
     parser.add_argument("--output", type=Path, default=None)
@@ -14,6 +19,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    # 主流程：汇总并保存
     args = parse_args()
     root = args.project_root.resolve()
     compare_dir = root / "outputs" / "compare"

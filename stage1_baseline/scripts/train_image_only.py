@@ -1,4 +1,8 @@
+﻿# -*- coding: utf-8 -*-
 from __future__ import annotations
+# 作用: 仅图像消融训练（ResNet18）。
+# 流程: 图像增强 -> 训练 -> 验证评估。
+# 输出: best_image_only.pt 与 metrics_image_only.json/csv。
 
 import argparse
 from pathlib import Path
@@ -12,6 +16,7 @@ import torch
 from torch.utils.data import DataLoader
 
 def _find_project_root(start: Path) -> Path:
+    # 向上查找项目根目录
     cur = start
     while True:
         if (cur / 'requirements.txt').exists() or (cur / '.git').exists():
@@ -30,6 +35,7 @@ from src.model_ablation import ImageOnlyClassifier
 
 
 def parse_args() -> argparse.Namespace:
+    # 解析命令行参数
     parser = argparse.ArgumentParser(description="Train image-only ResNet18 model.")
     parser.add_argument("--project-root", type=Path, default=Path("."))
     parser.add_argument("--train-csv", type=Path, default=None)
@@ -48,6 +54,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def set_seed(seed: int) -> None:
+    # 固定随机种子，便于复现
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -56,6 +63,7 @@ def set_seed(seed: int) -> None:
 
 
 def _default_splits(root: Path) -> tuple[Path, Path]:
+    # 默认使用 outputs/splits 下的划分文件
     return (
         root / "outputs" / "splits" / "train.csv",
         root / "outputs" / "splits" / "val.csv",
@@ -63,6 +71,7 @@ def _default_splits(root: Path) -> tuple[Path, Path]:
 
 
 def evaluate(model, loader, device) -> dict:
+    # 在验证集上评估指标
     model.eval()
     preds = []
     labels = []
@@ -81,6 +90,7 @@ def evaluate(model, loader, device) -> dict:
 
 
 def main() -> None:
+    # 主训练流程
     args = parse_args()
     root = args.project_root.resolve()
     set_seed(args.seed)
@@ -181,6 +191,7 @@ def main() -> None:
 
 
 def json_dumps(payload: dict) -> str:
+    # 保存 JSON 时使用统一格式
     import json
 
     return json.dumps(payload, ensure_ascii=False, indent=2)

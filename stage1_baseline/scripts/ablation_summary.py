@@ -1,4 +1,8 @@
+﻿# -*- coding: utf-8 -*-
 from __future__ import annotations
+# 作用: 汇总消融实验结果。
+# 流程: 读取各实验历史文件并取最佳 F1。
+# 输出: outputs/ablation_summary.csv。
 
 import argparse
 from pathlib import Path
@@ -7,6 +11,7 @@ import pandas as pd
 
 
 def parse_args() -> argparse.Namespace:
+    # 解析命令行参数
     parser = argparse.ArgumentParser(description="Summarize ablation results.")
     parser.add_argument("--project-root", type=Path, default=Path("."))
     parser.add_argument("--output", type=Path, default=None)
@@ -14,6 +19,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def _best_from_history(path: Path) -> dict | None:
+    # 从历史 CSV 中找到最优 epoch
     if not path.exists():
         return None
     df = pd.read_csv(path)
@@ -29,6 +35,7 @@ def _best_from_history(path: Path) -> dict | None:
 
 
 def main() -> None:
+    # 主流程：汇总并保存
     args = parse_args()
     root = args.project_root.resolve()
     output = args.output or (root / "outputs" / "ablation_summary.csv")

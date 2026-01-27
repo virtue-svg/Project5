@@ -1,4 +1,8 @@
+﻿# -*- coding: utf-8 -*-
 from __future__ import annotations
+# 作用: 基线训练（TF-IDF + ResNet18）。
+# 流程: 文本特征 + 图像特征训练并生成可视化。
+# 输出: metrics/visuals/best.pt 等文件。
 
 import argparse
 import json
@@ -43,6 +47,7 @@ from src.text_utils import clean_text_advanced, read_text
 
 
 def parse_args() -> argparse.Namespace:
+    # 解析命令行参数
     parser = argparse.ArgumentParser(description="Train TF-IDF + ResNet18 multimodal model.")
     parser.add_argument("--project-root", type=Path, default=Path("."))
     parser.add_argument("--train-csv", type=Path, default=None)
@@ -66,6 +71,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def set_seed(seed: int) -> None:
+    # 固定随机种子，便于复现
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -74,6 +80,7 @@ def set_seed(seed: int) -> None:
 
 
 def _default_splits(root: Path) -> tuple[Path, Path, Path]:
+    # 默认使用 outputs/splits 下的划分文件
     return (
         root / "outputs" / "splits" / "train.csv",
         root / "outputs" / "splits" / "val.csv",
@@ -82,6 +89,7 @@ def _default_splits(root: Path) -> tuple[Path, Path, Path]:
 
 
 def load_texts(samples, remove_stopwords: bool) -> list[str]:
+    # 读取并清洗文本
     texts = []
     for s in samples:
         raw = read_text(s.text_path)
@@ -99,6 +107,7 @@ def load_texts(samples, remove_stopwords: bool) -> list[str]:
 def build_tfidf(
     train_samples, val_samples, test_samples, max_features, min_df, max_df, remove_stopwords
 ):
+    # 构建 TF-IDF 特征
     train_texts = load_texts(train_samples, remove_stopwords)
     val_texts = load_texts(val_samples, remove_stopwords)
     test_texts = load_texts(test_samples, remove_stopwords)
@@ -117,6 +126,7 @@ def build_tfidf(
 
 
 def evaluate(model, loader, device) -> dict:
+    # 在验证集上评估并返回预测/概率
     model.eval()
     preds = []
     labels = []
@@ -147,6 +157,7 @@ def evaluate(model, loader, device) -> dict:
 
 
 def _plot_curves(history: list[dict], out_path: Path) -> None:
+    # 绘制训练 loss 与验证 acc 曲线
     if not history:
         return
     epochs = [h["epoch"] for h in history]
@@ -170,6 +181,7 @@ def _plot_curves(history: list[dict], out_path: Path) -> None:
 
 
 def _plot_confusion(labels: list[int], preds: list[int], out_path: Path) -> None:
+    # 绘制混淆矩阵
     cm = confusion_matrix(labels, preds, labels=list(range(len(LABELS))))
     fig, ax = plt.subplots(figsize=(4.5, 4))
     im = ax.imshow(cm, cmap="Blues")
@@ -189,6 +201,7 @@ def _plot_confusion(labels: list[int], preds: list[int], out_path: Path) -> None
 
 
 def _plot_roc(labels: list[int], probs: list[list[float]], out_path: Path) -> None:
+    # 绘制 ROC 曲线（OvR）
     y_true = np.array(labels)
     y_score = np.array(probs)
     fig, ax = plt.subplots(figsize=(5, 4))
@@ -208,6 +221,7 @@ def _plot_roc(labels: list[int], probs: list[list[float]], out_path: Path) -> No
 
 
 def _plot_correlation(samples, preds: list[int], labels: list[int], out_path: Path) -> None:
+    # 绘制文本长度/图像面积与正确性的相关性
     if len(samples) != len(preds):
         return
     rows = []
@@ -245,6 +259,7 @@ def _plot_correlation(samples, preds: list[int], labels: list[int], out_path: Pa
 
 
 def main() -> None:
+    # 主训练流程
     args = parse_args()
     root = args.project_root.resolve()
     set_seed(args.seed)

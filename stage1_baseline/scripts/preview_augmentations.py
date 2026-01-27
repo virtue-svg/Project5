@@ -1,4 +1,8 @@
+﻿# -*- coding: utf-8 -*-
 from __future__ import annotations
+# 作用: 生成图像增强可视化样例。
+# 流程: 对训练样本做轻量增强并拼接成网格图。
+# 输出: outputs/processed/aug_samples/*.png。
 
 import argparse
 from pathlib import Path
@@ -9,6 +13,7 @@ import random
 from PIL import ImageEnhance, ImageOps
 
 def _find_project_root(start: Path) -> Path:
+    # 向上查找项目根目录
     cur = start
     while True:
         if (cur / 'requirements.txt').exists() or (cur / '.git').exists():
@@ -25,6 +30,7 @@ from src.data_utils import build_records
 
 
 def _first_existing(candidates: list[Path]) -> Path:
+    # 找到第一个存在的文件路径
     for p in candidates:
         if p.exists():
             return p
@@ -32,6 +38,7 @@ def _first_existing(candidates: list[Path]) -> Path:
 
 
 def _default_data_dir(root: Path) -> Path:
+    # 自动识别 data 目录位置
     if (root / "data" / "data").exists():
         return root / "data" / "data"
     if (root / "data" / "project5" / "data").exists():
@@ -40,6 +47,7 @@ def _default_data_dir(root: Path) -> Path:
 
 
 def parse_args() -> argparse.Namespace:
+    # 解析命令行参数
     parser = argparse.ArgumentParser(description="Preview conservative image augmentations.")
     parser.add_argument(
         "--project-root",
@@ -56,6 +64,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    # 主流程：生成增强样例图
     args = parse_args()
     root = args.project_root.resolve()
     data_dir = args.data_dir or _default_data_dir(root)
@@ -76,12 +85,14 @@ def main() -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     def resize_center_crop(img: Image.Image, size: int = 224) -> Image.Image:
+        # 基础中心裁剪（用于对比原图）
         img = img.resize((256, 256))
         left = (img.width - size) // 2
         top = (img.height - size) // 2
         return img.crop((left, top, left + size, top + size))
 
     def random_resized_crop(img: Image.Image, size: int = 224) -> Image.Image:
+        # 随机裁剪并缩放
         img = img.resize((256, 256))
         scale = random.uniform(0.8, 1.0)
         crop_size = int(256 * scale)
@@ -92,12 +103,14 @@ def main() -> None:
         return img.resize((size, size))
 
     def color_jitter(img: Image.Image) -> Image.Image:
+        # 轻量颜色扰动
         img = ImageEnhance.Brightness(img).enhance(random.uniform(0.9, 1.1))
         img = ImageEnhance.Contrast(img).enhance(random.uniform(0.9, 1.1))
         img = ImageEnhance.Color(img).enhance(random.uniform(0.9, 1.1))
         return img
 
     def augment(img: Image.Image) -> Image.Image:
+        # 组合增强：裁剪 + 翻转 + 颜色扰动
         img = random_resized_crop(img)
         if random.random() < 0.5:
             img = ImageOps.mirror(img)

@@ -1,10 +1,15 @@
+﻿# -*- coding: utf-8 -*-
 from __future__ import annotations
+# 作用: 生成训练/验证/测试划分文件。
+# 流程: 根据 guid 对齐文本/图像路径并分层划分。
+# 输出: outputs/splits/train.csv、val.csv、test.csv。
 
 import argparse
 from pathlib import Path
 import sys
 
 def _find_project_root(start: Path) -> Path:
+    # 从当前脚本向上查找项目根目录
     cur = start
     while True:
         if (cur / 'requirements.txt').exists() or (cur / '.git').exists():
@@ -24,6 +29,7 @@ from src.data_utils import build_records, ensure_paths
 
 
 def _first_existing(candidates: list[Path]) -> Path:
+    # 在候选路径中找到第一个存在的文件
     for p in candidates:
         if p.exists():
             return p
@@ -31,6 +37,7 @@ def _first_existing(candidates: list[Path]) -> Path:
 
 
 def _default_data_dir(root: Path) -> Path:
+    # 自动识别 data 目录位置
     if (root / "data" / "data").exists():
         return root / "data" / "data"
     if (root / "data" / "project5" / "data").exists():
@@ -39,6 +46,7 @@ def _default_data_dir(root: Path) -> Path:
 
 
 def parse_args() -> argparse.Namespace:
+    # 解析命令行参数
     parser = argparse.ArgumentParser(description="Prepare train/val/test splits.")
     parser.add_argument(
         "--project-root",
@@ -71,6 +79,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    # 主流程：读取标签文件并生成划分
     args = parse_args()
     root = args.project_root.resolve()
 
@@ -108,6 +117,7 @@ def main() -> None:
     )
 
     def to_frame(records: list) -> pd.DataFrame:
+        # 生成标准化的 CSV 结构
         return pd.DataFrame(
             {
                 "guid": [r.guid for r in records],

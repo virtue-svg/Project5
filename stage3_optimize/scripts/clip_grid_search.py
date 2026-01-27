@@ -1,4 +1,8 @@
+﻿# -*- coding: utf-8 -*-
 from __future__ import annotations
+# 作用: CLIP 超参网格搜索入口。
+# 流程: 组合超参并批量调用 optimize_clip.py。
+# 输出: outputs/optimize/grid_search.json。
 
 import argparse
 import json
@@ -8,6 +12,7 @@ import subprocess
 
 
 def parse_args() -> argparse.Namespace:
+    # 解析命令行参数
     parser = argparse.ArgumentParser(description="Grid search for CLIP optimization.")
     parser.add_argument("--project-root", type=Path, default=Path("."))
     parser.add_argument("--model-name", type=str, default="openai/clip-vit-base-patch32")
@@ -25,10 +30,12 @@ def parse_args() -> argparse.Namespace:
 
 
 def _parse_list(s: str, cast=float):
+    # 解析逗号分隔的数值列表
     return [cast(x.strip()) for x in s.split(",") if x.strip()]
 
 
 def main() -> None:
+    # 主流程：遍历组合并记录状态
     args = parse_args()
     root = args.project_root.resolve()
     bs_list = _parse_list(args.batch_sizes, int)

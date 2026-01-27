@@ -1,4 +1,8 @@
+﻿# -*- coding: utf-8 -*-
 from __future__ import annotations
+# 作用: CLIP 优化训练主脚本。
+# 流程: 可冻结编码器、早停与保存最优权重。
+# 输出: outputs/optimize/* 下的权重与指标。
 
 import argparse
 import json
@@ -16,6 +20,7 @@ from transformers import CLIPModel, CLIPProcessor
 
 
 def _find_project_root(start: Path) -> Path:
+    # 向上查找项目根目录
     cur = start
     while True:
         if (cur / "requirements.txt").exists() or (cur / ".git").exists():
@@ -35,6 +40,7 @@ from src.text_utils import clean_text_advanced, read_text
 
 
 def parse_args() -> argparse.Namespace:
+    # 解析命令行参数
     parser = argparse.ArgumentParser(description="Optimize CLIP-based multimodal model.")
     parser.add_argument("--project-root", type=Path, default=Path("."))
     parser.add_argument("--train-csv", type=Path, default=None)
@@ -51,11 +57,38 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-length", type=int, default=64)
     parser.add_argument("--freeze-epochs", type=int, default=1)
     parser.add_argument("--early-stop", type=int, default=3)
+    parser.add_argument(
+        "--head-variant",
+        type=str,
+        default="base",
+        choices=["base", "ln", "mlp", "gated"],
+        help="Head variant for lightweight structure ablation.",
+    )
+    parser.add_argument("--image-aug", action="store_true", help="Enable light image augmentation.")
+    parser.add_argument(
+        "--replace-emoji",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Toggle emoji normalization in text cleaning.",
+    )
+    parser.add_argument(
+        "--collapse-repeats",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Toggle repeated-character collapsing in text cleaning.",
+    )
+    parser.add_argument(
+        "--remove-stopwords",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Toggle stopword removal in text cleaning.",
+    )
     parser.add_argument("--output-dir", type=Path, default=None)
     return parser.parse_args()
 
 
 def set_seed(seed: int) -> None:
+    # 固定随机种子，便于复现
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -64,24 +97,47 @@ def set_seed(seed: int) -> None:
 
 
 def _default_splits(root: Path) -> tuple[Path, Path]:
+    # 默认使用 outputs/splits 下的划分文件
     return (
         root / "outputs" / "splits" / "train.csv",
         root / "outputs" / "splits" / "val.csv",
     )
 
 
-def _load_texts(samples) -> list[str]:
+def _load_texts(
+    samples, replace_emoji: bool, collapse_repeats: bool, remove_stopwords: bool
+) -> list[str]:
+    # 读取并清洗文本
     texts = []
     for s in samples:
         raw = read_text(s.text_path)
-        texts.append(clean_text_advanced(raw, replace_emoji=True, collapse_repeats=True))
+        texts.append(
+            clean_text_advanced(
+                raw,
+                replace_emoji=replace_emoji,
+                collapse_repeats=collapse_repeats,
+                remove_stopwords=remove_stopwords,
+            )
+        )
     return texts
 
 
-def collate_clip_batch(processor, batch, max_length: int):
+def collate_clip_batch(processor, batch, max_length: int, image_aug: bool = False):
+    # 将原始文本/图像打包为 CLIP 输入
     images = [b[0] for b in batch]
     texts = [b[1] for b in batch]
     labels = torch.tensor([b[2] for b in batch], dtype=torch.long)
+    if image_aug:
+        import torchvision.transforms as T
+
+        aug = T.Compose(
+            [
+                T.RandomResizedCrop(224, scale=(0.85, 1.0)),
+                T.RandomHorizontalFlip(p=0.5),
+                T.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1, hue=0.02),
+            ]
+        )
+        images = [aug(img) for img in images]
     text_inputs = processor.tokenizer(
         texts,
         return_tensors="pt",
@@ -99,6 +155,7 @@ def collate_clip_batch(processor, batch, max_length: int):
 
 
 def evaluate(model, loader, device) -> dict:
+    # 在验证集上评估指标
     model.eval()
     preds = []
     labels = []
@@ -119,11 +176,13 @@ def evaluate(model, loader, device) -> dict:
 
 
 def _set_encoder_trainable(clip_model: CLIPModel, trainable: bool) -> None:
+    # 冻结/解冻 CLIP 编码器参数
     for p in clip_model.parameters():
         p.requires_grad = trainable
 
 
 def main() -> None:
+    # 主训练流程
     args = parse_args()
     root = args.project_root.resolve()
     set_seed(args.seed)
@@ -134,8 +193,18 @@ def main() -> None:
 
     train_samples = load_split_csv(Path(train_csv))
     val_samples = load_split_csv(Path(val_csv))
-    train_texts = _load_texts(train_samples)
-    val_texts = _load_texts(val_samples)
+    train_texts = _load_texts(
+        train_samples,
+        args.replace_emoji,
+        args.collapse_repeats,
+        args.remove_stopwords,
+    )
+    val_texts = _load_texts(
+        val_samples,
+        args.replace_emoji,
+        args.collapse_repeats,
+        args.remove_stopwords,
+    )
 
     processor = CLIPProcessor.from_pretrained(args.model_name)
     clip = CLIPModel.from_pretrained(args.model_name)
@@ -148,7 +217,12 @@ def main() -> None:
         torch.backends.cudnn.benchmark = True
     print(f"Device: {device}")
 
-    collate_fn = partial(collate_clip_batch, processor, max_length=args.max_length)
+    collate_fn = partial(
+        collate_clip_batch,
+        processor,
+        max_length=args.max_length,
+        image_aug=args.image_aug,
+    )
     loader_kwargs = dict(
         batch_size=args.batch_size,
         num_workers=args.num_workers,
@@ -159,7 +233,9 @@ def main() -> None:
     train_loader = DataLoader(train_ds, shuffle=True, **loader_kwargs)
     val_loader = DataLoader(val_ds, shuffle=False, **loader_kwargs)
 
-    model = ClipFusionClassifier(clip, dropout=args.dropout).to(device)
+    model = ClipFusionClassifier(
+        clip, dropout=args.dropout, head_variant=args.head_variant
+    ).to(device)
     total_params = sum(p.numel() for p in model.parameters())
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
 

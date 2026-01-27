@@ -1,4 +1,8 @@
+﻿# -*- coding: utf-8 -*-
 from __future__ import annotations
+# 作用: 文本清洗并导出清洗后的 CSV。
+# 流程: 读取文本 -> 基础清洗 -> 进阶清洗。
+# 输出: outputs/processed/text_cleaned.csv。
 
 import argparse
 from pathlib import Path
@@ -7,6 +11,7 @@ import sys
 import pandas as pd
 
 def _find_project_root(start: Path) -> Path:
+    # 向上查找项目根目录
     cur = start
     while True:
         if (cur / 'requirements.txt').exists() or (cur / '.git').exists():
@@ -24,6 +29,7 @@ from src.text_utils import clean_text, clean_text_advanced, read_text
 
 
 def _first_existing(candidates: list[Path]) -> Path:
+    # 找到第一个存在的文件路径
     for p in candidates:
         if p.exists():
             return p
@@ -31,6 +37,7 @@ def _first_existing(candidates: list[Path]) -> Path:
 
 
 def _default_data_dir(root: Path) -> Path:
+    # 自动识别 data 目录位置
     if (root / "data" / "data").exists():
         return root / "data" / "data"
     if (root / "data" / "project5" / "data").exists():
@@ -39,6 +46,7 @@ def _default_data_dir(root: Path) -> Path:
 
 
 def parse_args() -> argparse.Namespace:
+    # 解析命令行参数
     parser = argparse.ArgumentParser(description="Clean text and export CSV.")
     parser.add_argument(
         "--project-root",
@@ -74,6 +82,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def _process(records: list, split: str, remove_stopwords: bool) -> pd.DataFrame:
+    # 对指定 split 做清洗并返回 DataFrame
     rows = []
     missing = 0
     for rec in records:
@@ -104,6 +113,7 @@ def _process(records: list, split: str, remove_stopwords: bool) -> pd.DataFrame:
 
 
 def main() -> None:
+    # 主流程：清洗 train/test 并保存
     args = parse_args()
     root = args.project_root.resolve()
     data_dir = args.data_dir or _default_data_dir(root)

@@ -1,4 +1,8 @@
+﻿# -*- coding: utf-8 -*-
 from __future__ import annotations
+# 作用: 对比实验可视化汇总。
+# 流程: 读取对比结果并绘制多种图表。
+# 输出: outputs/compare/visuals 下的图片。
 
 import argparse
 import json
@@ -21,6 +25,7 @@ import pandas as pd
 
 
 def parse_args() -> argparse.Namespace:
+    # 解析命令行参数
     parser = argparse.ArgumentParser(description="Visualize comparison results.")
     parser.add_argument("--project-root", type=Path, default=Path("."))
     parser.add_argument("--output-dir", type=Path, default=None)
@@ -28,6 +33,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def _load_runs(compare_dir: Path) -> list[dict]:
+    # 加载各 run 的 metrics 与 history
     runs = []
     for run_dir in compare_dir.glob("*"):
         metrics_path = run_dir / "metrics.json"
@@ -47,6 +53,7 @@ def _load_runs(compare_dir: Path) -> list[dict]:
 
 
 def _radar_plot(runs: list[dict], out_path: Path) -> None:
+    # 绘制指标雷达图
     metrics_keys = ["val_acc", "val_f1_macro", "val_precision_macro", "val_recall_macro"]
     labels = ["Acc", "F1", "Prec", "Recall"]
     fig = plt.figure(figsize=(5, 4.5))
@@ -82,6 +89,7 @@ def _radar_plot(runs: list[dict], out_path: Path) -> None:
 
 
 def _params_time_plot(runs: list[dict], out_path: Path) -> None:
+    # 绘制参数量与训练时间对比
     names = [r["name"] for r in runs]
     params = [r["metrics"].get("params_million", 0) for r in runs]
     times = [r["metrics"].get("train_time_sec", 0) / 60.0 for r in runs]
@@ -108,6 +116,7 @@ def _params_time_plot(runs: list[dict], out_path: Path) -> None:
 
 
 def _loss_curves(runs: list[dict], out_path: Path) -> None:
+    # 绘制训练 loss 曲线
     fig, ax = plt.subplots(figsize=(6.5, 4))
     for run in runs:
         hist = run["history"]
@@ -127,6 +136,7 @@ def _loss_curves(runs: list[dict], out_path: Path) -> None:
 
 
 def _table_image(runs: list[dict], out_path: Path) -> None:
+    # 将指标表格保存为图片
     rows = []
     for run in runs:
         hist = run["history"]
@@ -157,6 +167,7 @@ def _table_image(runs: list[dict], out_path: Path) -> None:
 
 
 def main() -> None:
+    # 主流程：生成对比可视化
     args = parse_args()
     root = args.project_root.resolve()
     compare_dir = root / "outputs" / "compare"

@@ -1,4 +1,8 @@
+﻿# -*- coding: utf-8 -*-
 from __future__ import annotations
+# 作用: 统计文本长度、图像尺寸与缺失情况。
+# 流程: 遍历样本并汇总统计指标。
+# 输出: outputs/processed/data_stats.csv 与 data_stats_summary.json。
 
 import argparse
 import json
@@ -10,6 +14,7 @@ import pandas as pd
 from PIL import Image
 
 def _find_project_root(start: Path) -> Path:
+    # 向上查找项目根目录
     cur = start
     while True:
         if (cur / 'requirements.txt').exists() or (cur / '.git').exists():
@@ -27,6 +32,7 @@ from src.text_utils import clean_text, read_text
 
 
 def _first_existing(candidates: list[Path]) -> Path:
+    # 找到第一个存在的文件路径
     for p in candidates:
         if p.exists():
             return p
@@ -34,6 +40,7 @@ def _first_existing(candidates: list[Path]) -> Path:
 
 
 def _default_data_dir(root: Path) -> Path:
+    # 自动识别 data 目录位置
     if (root / "data" / "data").exists():
         return root / "data" / "data"
     if (root / "data" / "project5" / "data").exists():
@@ -42,6 +49,7 @@ def _default_data_dir(root: Path) -> Path:
 
 
 def parse_args() -> argparse.Namespace:
+    # 解析命令行参数
     parser = argparse.ArgumentParser(description="Compute dataset statistics.")
     parser.add_argument(
         "--project-root",
@@ -57,6 +65,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def _image_info(path: Path) -> tuple[int | None, int | None]:
+    # 读取图像尺寸（宽、高）
     try:
         with Image.open(path) as img:
             return img.width, img.height
@@ -65,6 +74,7 @@ def _image_info(path: Path) -> tuple[int | None, int | None]:
 
 
 def _collect(records: list, split: str) -> tuple[pd.DataFrame, dict]:
+    # 统计某个 split 的详细记录与汇总信息
     label_counter = Counter()
     missing_text = 0
     missing_image = 0
@@ -112,6 +122,7 @@ def _collect(records: list, split: str) -> tuple[pd.DataFrame, dict]:
 
 
 def main() -> None:
+    # 主流程：统计并保存到 CSV/JSON
     args = parse_args()
     root = args.project_root.resolve()
     data_dir = args.data_dir or _default_data_dir(root)
