@@ -8,7 +8,16 @@ from PIL import Image
 import random
 from PIL import ImageEnhance, ImageOps
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+def _find_project_root(start: Path) -> Path:
+    cur = start
+    while True:
+        if (cur / 'requirements.txt').exists() or (cur / '.git').exists():
+            return cur
+        if cur.parent == cur:
+            return start
+        cur = cur.parent
+
+PROJECT_ROOT = _find_project_root(Path(__file__).resolve())
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 

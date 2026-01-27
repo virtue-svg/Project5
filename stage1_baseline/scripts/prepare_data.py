@@ -4,14 +4,23 @@ import argparse
 from pathlib import Path
 import sys
 
-import pandas as pd
+def _find_project_root(start: Path) -> Path:
+    cur = start
+    while True:
+        if (cur / 'requirements.txt').exists() or (cur / '.git').exists():
+            return cur
+        if cur.parent == cur:
+            return start
+        cur = cur.parent
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = _find_project_root(Path(__file__).resolve())
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.data_utils import build_records
-from src.text_utils import clean_text, clean_text_advanced, read_text
+import pandas as pd
+from sklearn.model_selection import train_test_split
+
+from src.data_utils import build_records, ensure_paths
 
 
 def _first_existing(candidates: list[Path]) -> Path:
@@ -30,7 +39,7 @@ def _default_data_dir(root: Path) -> Path:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Clean text and export CSV.")
+    parser = argparse.ArgumentParser(description="Prepare train/val/test splits.")
     parser.add_argument(
         "--project-root",
         type=Path,
@@ -55,50 +64,18 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Path to test_without_label.txt (guid + null).",
     )
+    parser.add_argument("--val-ratio", type=float, default=0.1)
+    parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--output-dir", type=Path, default=None)
-    parser.add_argument(
-        "--remove-stopwords",
-        action="store_true",
-        help="Enable light stopword removal in advanced cleaning.",
-    )
     return parser.parse_args()
-
-
-def _process(records: list, split: str, remove_stopwords: bool) -> pd.DataFrame:
-    rows = []
-    missing = 0
-    for rec in records:
-        if rec.text_path is None:
-            missing += 1
-            continue
-        raw = read_text(rec.text_path)
-        cleaned = clean_text(raw)
-        cleaned_adv = clean_text_advanced(
-            raw, replace_emoji=True, collapse_repeats=True, remove_stopwords=remove_stopwords
-        )
-        rows.append(
-            {
-                "guid": rec.guid,
-                "split": split,
-                "label": rec.label,
-                "text": raw.strip(),
-                "text_clean": cleaned,
-                "text_clean_adv": cleaned_adv,
-                "len_raw": len(raw),
-                "len_clean": len(cleaned),
-                "len_clean_adv": len(cleaned_adv),
-            }
-        )
-    if missing:
-        print(f"[warn] {split}: {missing} missing text files")
-    return pd.DataFrame(rows)
 
 
 def main() -> None:
     args = parse_args()
     root = args.project_root.resolve()
+
     data_dir = args.data_dir or _default_data_dir(root)
-    output_dir = args.output_dir or (root / "outputs" / "processed")
+    output_dir = args.output_dir or (root / "outputs" / "splits")
 
     train_file = args.train_file or _first_existing(
         [
@@ -118,13 +95,39 @@ def main() -> None:
     train_records = build_records(train_file, data_dir, has_label=True)
     test_records = build_records(test_file, data_dir, has_label=False)
 
-    train_df = _process(train_records, "train", args.remove_stopwords)
-    test_df = _process(test_records, "test", args.remove_stopwords)
+    ensure_paths(train_records)
+    ensure_paths(test_records)
+
+    train_ids = [r.guid for r in train_records]
+    train_idx, val_idx = train_test_split(
+        list(range(len(train_ids))),
+        test_size=args.val_ratio,
+        random_state=args.seed,
+        shuffle=True,
+        stratify=[r.label for r in train_records],
+    )
+
+    def to_frame(records: list) -> pd.DataFrame:
+        return pd.DataFrame(
+            {
+                "guid": [r.guid for r in records],
+                "text_path": [str(r.text_path) for r in records],
+                "image_path": [str(r.image_path) for r in records],
+                "label": [r.label for r in records],
+            }
+        )
+
+    train_df = to_frame([train_records[i] for i in train_idx])
+    val_df = to_frame([train_records[i] for i in val_idx])
+    test_df = to_frame(test_records)
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    out_path = output_dir / "text_cleaned.csv"
-    pd.concat([train_df, test_df], ignore_index=True).to_csv(out_path, index=False)
-    print(f"Saved cleaned text to: {out_path}")
+    train_df.to_csv(output_dir / "train.csv", index=False)
+    val_df.to_csv(output_dir / "val.csv", index=False)
+    test_df.to_csv(output_dir / "test.csv", index=False)
+
+    print(f"Saved splits to: {output_dir}")
+    print(f"Train: {len(train_df)}  Val: {len(val_df)}  Test: {len(test_df)}")
 
 
 if __name__ == "__main__":
