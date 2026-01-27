@@ -1,4 +1,4 @@
-# 阶段二 多模态模型对比
+﻿﻿## 阶段二 多模态模型对比
 
 ## 目标
 在统一数据划分与训练设置下，对比不同融合策略，选出本次实验最佳模型，再进行单独优化。
@@ -54,14 +54,14 @@
 - 作用：BERT 与 ResNet18 分别分类，后融合取平均。
 - 输出：`outputs/compare/bert-base-chinese_resnet18_late/`（含 `best.pt`, `metrics.json`, `history.csv`）
 
-## CLIP 对比
+### 4) CLIP 对比
 ```powershell
 .\.venv\Scripts\python stage2_compare/scripts/compare_clip.py --project-root . --model-name openai/clip-vit-base-patch32 --epochs 5 --batch-size 16 --num-workers 2 --pin-memory
 ```
 - 作用：CLIP 图文编码 + 分类头训练。
 - 输出：`outputs/compare/clip_openai_clip-vit-base-patch32/`（含 `best.pt`, `metrics.json`, `history.csv`）
 
-## BLIP 对比
+### 5) BLIP 对比
 ```powershell
 .\.venv\Scripts\python stage2_compare/scripts/compare_blip.py --project-root . --model-name Salesforce/blip-image-captioning-base --epochs 5 --batch-size 8 --num-workers 2 --pin-memory
 ```
