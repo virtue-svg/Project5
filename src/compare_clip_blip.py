@@ -21,6 +21,9 @@ class ClipFusionClassifier(nn.Module):
         super().__init__()
         self.clip = clip_model
         self.head_variant = head_variant
+        # 模态消融开关（默认关闭）
+        self.ablate_text = False
+        self.ablate_image = False
         # CLIP 默认投影维度（不同模型可能不同）
         embed_dim = getattr(clip_model.config, "projection_dim", 512)
         self.text_proj = nn.Linear(embed_dim, hidden_dim)
@@ -57,6 +60,10 @@ class ClipFusionClassifier(nn.Module):
         image_feat = outputs.image_embeds
         text_feat = self.dropout(torch.relu(self.text_proj(text_feat)))
         image_feat = self.dropout(torch.relu(self.image_proj(image_feat)))
+        if self.ablate_text:
+            text_feat = torch.zeros_like(text_feat)
+        if self.ablate_image:
+            image_feat = torch.zeros_like(image_feat)
         if self.head_variant == "gated":
             gate = torch.sigmoid(self.gate(torch.cat([text_feat, image_feat], dim=1)))
             fused = torch.cat([gate * image_feat, (1 - gate) * text_feat], dim=1)

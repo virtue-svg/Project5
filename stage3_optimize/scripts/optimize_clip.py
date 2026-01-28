@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from pathlib import Path
 import random
 import sys
@@ -15,6 +16,7 @@ from functools import partial
 import numpy as np
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
 import torch
+import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from transformers import CLIPModel, CLIPProcessor
 
@@ -58,12 +60,28 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--freeze-epochs", type=int, default=1)
     parser.add_argument("--early-stop", type=int, default=3)
     parser.add_argument(
+        "--loss",
+        type=str,
+        default="ce",
+        choices=["ce", "focal", "cb", "combo"],
+        help="Loss type: ce (weighted cross-entropy), focal, class-balanced (cb), or combo.",
+    )
+    parser.add_argument("--focal-gamma", type=float, default=2.0)
+    parser.add_argument("--cb-beta", type=float, default=0.9999)
+    parser.add_argument("--w-wce", type=float, default=1.0, help="Weight for weighted CE in combo.")
+    parser.add_argument("--w-ce", type=float, default=1.0, help="Weight for unweighted CE in combo.")
+    parser.add_argument("--w-focal", type=float, default=1.0, help="Weight for focal loss in combo.")
+    parser.add_argument("--use-cosine", action="store_true", help="Enable cosine decay schedule.")
+    parser.add_argument("--warmup-ratio", type=float, default=0.05)
+    parser.add_argument(
         "--head-variant",
         type=str,
         default="base",
         choices=["base", "ln", "mlp", "gated"],
         help="Head variant for lightweight structure ablation.",
     )
+    parser.add_argument("--ablate-text", action="store_true", help="Ablate text features.")
+    parser.add_argument("--ablate-image", action="store_true", help="Ablate image features.")
     parser.add_argument("--image-aug", action="store_true", help="Enable light image augmentation.")
     parser.add_argument(
         "--replace-emoji",
@@ -175,6 +193,45 @@ def evaluate(model, loader, device) -> dict:
     return {"acc": acc, "f1_macro": f1, "precision_macro": precision, "recall_macro": recall}
 
 
+def _class_balanced_weights(label_counts: np.ndarray, beta: float) -> torch.Tensor:
+    # 计算 Class-Balanced 权重（effective number）
+    effective_num = 1.0 - np.power(beta, label_counts)
+    weights = (1.0 - beta) / np.maximum(effective_num, 1e-8)
+    weights = weights / weights.sum() * len(label_counts)
+    return torch.tensor(weights, dtype=torch.float32)
+
+
+def focal_loss(logits: torch.Tensor, targets: torch.Tensor, alpha: torch.Tensor | None, gamma: float) -> torch.Tensor:
+    # 多分类 Focal Loss
+    log_probs = F.log_softmax(logits, dim=1)
+    log_pt = log_probs.gather(1, targets.unsqueeze(1)).squeeze(1)
+    pt = log_pt.exp()
+    loss = -(1 - pt) ** gamma * log_pt
+    if alpha is not None:
+        loss = loss * alpha.gather(0, targets)
+    return loss.mean()
+
+
+def build_scheduler(
+    optimizer: torch.optim.Optimizer,
+    total_steps: int,
+    warmup_ratio: float,
+    use_cosine: bool,
+) -> torch.optim.lr_scheduler.LambdaLR | None:
+    # 可选 warmup + cosine 学习率调度
+    if not use_cosine:
+        return None
+    warmup_steps = max(1, int(total_steps * warmup_ratio))
+
+    def lr_lambda(step: int) -> float:
+        if step < warmup_steps:
+            return float(step) / float(warmup_steps)
+        progress = (step - warmup_steps) / max(1, total_steps - warmup_steps)
+        return 0.5 * (1.0 + math.cos(math.pi * progress))
+
+    return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
+
+
 def _set_encoder_trainable(clip_model: CLIPModel, trainable: bool) -> None:
     # 冻结/解冻 CLIP 编码器参数
     for p in clip_model.parameters():
@@ -236,6 +293,8 @@ def main() -> None:
     model = ClipFusionClassifier(
         clip, dropout=args.dropout, head_variant=args.head_variant
     ).to(device)
+    model.ablate_text = args.ablate_text
+    model.ablate_image = args.ablate_image
     total_params = sum(p.numel() for p in model.parameters())
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
 
@@ -243,7 +302,13 @@ def main() -> None:
     class_weights = torch.tensor(
         (label_counts.sum() / np.maximum(label_counts, 1)), dtype=torch.float32
     ).to(device)
-    criterion = torch.nn.CrossEntropyLoss(weight=class_weights)
+    cb_weights = _class_balanced_weights(label_counts, args.cb_beta).to(device)
+    if args.loss == "ce":
+        criterion = torch.nn.CrossEntropyLoss(weight=class_weights)
+    elif args.loss == "cb":
+        criterion = torch.nn.CrossEntropyLoss(weight=cb_weights)
+    else:
+        criterion = None
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
     best_f1 = -1.0
@@ -255,6 +320,15 @@ def main() -> None:
     best_path = output_dir / "best.pt"
 
     start_time = time.time()
+    total_steps = args.epochs * max(len(train_loader), 1)
+    scheduler = build_scheduler(
+        optimizer,
+        total_steps=total_steps,
+        warmup_ratio=args.warmup_ratio,
+        use_cosine=args.use_cosine,
+    )
+    global_step = 0
+
     for epoch in range(1, args.epochs + 1):
         model.train()
         if epoch <= args.freeze_epochs:
@@ -270,9 +344,26 @@ def main() -> None:
             y = y.to(device)
             optimizer.zero_grad()
             logits = model(input_ids, attention_mask, pixel_values)
-            loss = criterion(logits, y)
+            if args.loss == "focal":
+                loss = focal_loss(logits, y, alpha=class_weights, gamma=args.focal_gamma)
+            elif args.loss == "combo":
+                w_sum = args.w_wce + args.w_ce + args.w_focal
+                if w_sum <= 0:
+                    raise ValueError("Combo loss weights must sum to a positive value.")
+                w_wce = args.w_wce / w_sum
+                w_ce = args.w_ce / w_sum
+                w_focal = args.w_focal / w_sum
+                loss_wce = F.cross_entropy(logits, y, weight=class_weights)
+                loss_ce = F.cross_entropy(logits, y)
+                loss_focal = focal_loss(logits, y, alpha=class_weights, gamma=args.focal_gamma)
+                loss = w_wce * loss_wce + w_ce * loss_ce + w_focal * loss_focal
+            else:
+                loss = criterion(logits, y)
             loss.backward()
             optimizer.step()
+            if scheduler is not None:
+                scheduler.step()
+            global_step += 1
             running_loss += loss.item()
 
         metrics = evaluate(model, val_loader, device)

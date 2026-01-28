@@ -22,6 +22,20 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--lr", type=float, default=1e-5)
     parser.add_argument("--weight-decay", type=float, default=1e-4)
     parser.add_argument("--dropout", type=float, default=0.2)
+    parser.add_argument(
+        "--loss",
+        type=str,
+        default="ce",
+        choices=["ce", "focal", "cb", "combo"],
+        help="Loss type: ce, focal, class-balanced (cb), or combo.",
+    )
+    parser.add_argument("--focal-gamma", type=float, default=2.0)
+    parser.add_argument("--cb-beta", type=float, default=0.9999)
+    parser.add_argument("--w-wce", type=float, default=1.0)
+    parser.add_argument("--w-ce", type=float, default=1.0)
+    parser.add_argument("--w-focal", type=float, default=1.0)
+    parser.add_argument("--use-cosine", action="store_true")
+    parser.add_argument("--warmup-ratio", type=float, default=0.05)
     parser.add_argument("--num-workers", type=int, default=0)
     parser.add_argument("--pin-memory", action="store_true")
     parser.add_argument(
@@ -60,6 +74,20 @@ def main() -> None:
         str(args.weight_decay),
         "--dropout",
         str(args.dropout),
+        "--loss",
+        args.loss,
+        "--focal-gamma",
+        str(args.focal_gamma),
+        "--cb-beta",
+        str(args.cb_beta),
+        "--w-wce",
+        str(args.w_wce),
+        "--w-ce",
+        str(args.w_ce),
+        "--w-focal",
+        str(args.w_focal),
+        "--warmup-ratio",
+        str(args.warmup_ratio),
         "--num-workers",
         str(args.num_workers),
         "--output-dir",
@@ -67,6 +95,8 @@ def main() -> None:
     ]
     if args.pin_memory:
         cmd.append("--pin-memory")
+    if args.use_cosine:
+        cmd.append("--use-cosine")
 
     print("Running:", " ".join(cmd))
     subprocess.run(cmd, check=True)

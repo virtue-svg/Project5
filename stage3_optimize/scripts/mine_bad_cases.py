@@ -114,10 +114,17 @@ def main() -> None:
 
     processor = CLIPProcessor.from_pretrained(args.model_name)
     clip = CLIPModel.from_pretrained(args.model_name)
-    model = ClipFusionClassifier(clip).eval()
 
     state = torch.load(weights, map_location="cpu")
-    model.load_state_dict(state["model_state"])
+    state_args = state.get("args", {}) if isinstance(state, dict) else {}
+    dropout = float(state_args.get("dropout", 0.2))
+    head_variant = state_args.get("head_variant", "base")
+    model = ClipFusionClassifier(clip, dropout=dropout, head_variant=head_variant).eval()
+
+    if isinstance(state, dict) and "model_state" in state:
+        model.load_state_dict(state["model_state"], strict=False)
+    else:
+        model.load_state_dict(state, strict=False)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
