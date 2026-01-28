@@ -13,10 +13,12 @@ __pycache__/
 .ipynb_checkpoints/
 
 # Outputs
-outputs/
+outputs/*
+!outputs/README.markdown
 
 # Data (do not commit)
-data/
+data/*
+!data/README.markdown
 
 # OS
 .DS_Store
