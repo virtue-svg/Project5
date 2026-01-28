@@ -81,6 +81,8 @@ python -m pip install -r requirements.txt
 - 合并增强样本再训练
 - 测试集预测文件生成
 
+**测试集预测文件：** 最终提交文件已放在仓库根目录 `test_with_label_final.txt`（格式：`guid,tag`）。
+
 ## 参考与致谢
 **模型与论文参考：**
 - **ResNet18** — He, K., Zhang, X., Ren, S., Sun, J. *Deep Residual Learning for Image Recognition*. CVPR 2016, pp. 770-778. DOI: 10.1109/CVPR.2016.90。
